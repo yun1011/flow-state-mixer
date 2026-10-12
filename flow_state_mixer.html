@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>心流環境音與動態視覺調音台 | Flow State Mixer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@200;300;400;500&display=swap" rel="stylesheet">
+  
+  <style>
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+      margin: 0;
+      padding: 0;
+    }
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #050608;
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: #eaeef4;
+    }
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      touch-action: none;
+    }
+    .hud-element {
+      transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1), transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .glow-dot {
+      box-shadow: 0 0 20px 4px currentColor;
+    }
+    @keyframes pulse-subtle {
+      0%, 100% { transform: scale(1); opacity: 0.7; }
+      50% { transform: scale(1.06); opacity: 0.95; }
+    }
+    .breathing-hint {
+      animation: pulse-subtle 4.5s ease-in-out infinite;
+    }
+    /* Minimal glass button styling */
+    .glass-btn {
+      background: rgba(255, 255, 255, 0.04);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .glass-btn:hover {
+      background: rgba(255, 255, 255, 0.12);
+      border-color: rgba(255, 255, 255, 0.25);
+      transform: translateY(-1px);
+    }
+    .glass-btn:active {
+      transform: scale(0.96);
+    }
+  </style>
+</head>
+<body class="relative w-screen h-screen overflow-hidden bg-black select-none">
+  <canvas id="stageCanvas"></canvas>
+
+  <!-- Ambient quadrant labels (subtle micro typography) -->
+  <div class="pointer-events-none absolute inset-0 z-10 flex flex-col justify-between p-7 sm:p-10 opacity-30 transition-opacity duration-1000" id="quadrantLabels">
+    <div class="flex justify-between items-start text-[11px] tracking-[0.25em] font-light uppercase">
+      <div class="flex items-center gap-2">
+        <span class="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
+        <span class="text-cyan-200">雨聲白噪 • Rain (有機放鬆)</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="text-amber-200">柴火微噪 • Fire (有機專注)</span>
+        <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+      </div>
+    </div>
+    <div class="flex justify-between items-end text-[11px] tracking-[0.25em] font-light uppercase">
+      <div class="flex items-center gap-2">
+        <span class="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+        <span class="text-indigo-200">深沉低頻 • Drone (深層沉思)</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="text-emerald-300">氛圍和弦 • Chords (賽博心流)</span>
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+      </div>
+    </div>
+  </div>
+
+  <div id="introOverlay" class="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/60 backdrop-blur-md cursor-pointer transition-all duration-1000 px-6 text-center">
+    <div class="flex flex-col items-center max-w-md pointer-events-none">
+      <div class="relative w-24 h-24 mb-8 flex items-center justify-center">
+        <div class="absolute inset-0 rounded-full border border-white/20 animate-ping opacity-40 duration-1000"></div>
+        <div class="absolute inset-2 rounded-full border border-white/40 breathing-hint"></div>
+        <svg class="w-8 h-8 text-white/90 translate-x-0.5" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M8 5v14l11-7z" />
+        </svg>
+      </div>
+      <h1 class="text-2xl sm:text-3xl font-light tracking-[0.2em] text-white/95 mb-3 uppercase">心流調音台</h1>
+      <p class="text-xs sm:text-sm tracking-[0.18em] text-white/50 font-light mb-8 leading-relaxed">
+        沉浸式聲光冥想 • 點擊畫面以解鎖音頻
+      </p>
+      <div class="px-5 py-2.5 rounded-full glass-btn text-xs tracking-widest text-white/80 uppercase font-light">
+        Tap to Enter Flow State
+      </div>
+    </div>
+  </div>
+
+  <div id="hudControls" class="hud-element opacity-0 pointer-events-none absolute bottom-6 right-6 sm:bottom-8 sm:right-8 z-20 flex items-center gap-3">
+    <!-- Real-time mix feedback label -->
+    <div id="statusPill" class="hidden sm:flex items-center gap-2 px-3.5 py-2 rounded-full glass-btn text-[11px] font-mono tracking-wider text-white/60">
+      <span id="coordDisplay">X: 50% | Y: 50%</span>
+    </div>
+
+    <!-- Mute / Unmute Button -->
+    <button id="muteBtn" class="pointer-events-auto p-3 sm:px-4 sm:py-2.5 rounded-full glass-btn flex items-center gap-2 text-white/80 hover:text-white" title="靜音 / 開啟聲音">
+      <svg id="soundOnIcon" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M15.536 8.464a5 5 0 010 7.072M17.95 6.05a8 8 0 010 11.9M11 5L6 9H2v6h4l5 4V5z"/>
+      </svg>
+      <svg id="soundOffIcon" class="w-4 h-4 hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M5.586 15H2v-6h3.586l5-5v14l-5-5zm15.414-3a9 9 0 00-2.636-6.364M3 3l18 18"/>
+      </svg>
+      <span class="text-[11px] tracking-wider uppercase font-light hidden sm:inline" id="muteText">靜音</span>
+    </button>
+
+    <!-- Fullscreen toggle -->
+    <button id="fsBtn" class="pointer-events-auto p-3 rounded-full glass-btn text-white/80 hover:text-white" title="切換全螢幕">
+      <svg id="fsExpandIcon" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-5h-4m4 0v4m0-4l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/>
+      </svg>
+      <svg id="fsCompressIcon" class="w-4 h-4 hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9 4v4m0 0H5m4 0L4 3m6 17v-4m0 0H5m4 0l-5 5m11-17h-4m0 0v4m0-4l5-5m-1 16h-4m0 0v-4m0 4l5 5"/>
+      </svg>
+    </button>
+  </div>
+
+  <script>
+    // Master State
+    let audioCtx = null;
+    let isAudioStarted = false;
+    let isMuted = false;
+    let currentNormX = 0.5;
+    let currentNormY = 0.5;
+    let targetNormX = 0.5;
+    let targetNormY = 0.5;
+    let isPointerDown = false;
+
+    // Audio Nodes Dictionary
+    let audioGraph = {
+      masterGain: null,
+      rain: { gain: null },
+      drone: { gain: null, filters: [] },
+      chords: { gain: null, nodes: [] },
+      crackle: { gain: null, node: null }
+    };
+
+    function initWebAudio() {
+      if (audioCtx) return;
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AudioContextClass();
+
+      // Master output
+      const master = audioCtx.createGain();
+      master.gain.setValueAtTime(0.001, audioCtx.currentTime);
+      master.gain.exponentialRampToValueAtTime(0.75, audioCtx.currentTime + 2.0);
+      master.connect(audioCtx.destination);
+      audioGraph.masterGain = master;
+
+      // 1. Rain Synthesizer (White Noise + Bandpass Filter)
+      setupRainSynthesizer(master);
+
+      // 2. Deep Pink Drone (Pink Noise + Lowpass + Detuned Sub-Oscillators)
+      setupDeepDrone(master);
+
+      // 3. Ambient Sine Chords (Dreamy LFO pad + fifth harmonics)
+      setupAmbientPad(master);
+
+      // 4. Fire/Vinyl Crackle (Random impulse generator via AudioWorklet/ScriptProcessor fallback)
+      setupFireCrackle(master);
+
+      updateSoundVolumes(currentNormX, currentNormY, 0.2);
+    }
+
+    /* 1. Rain Generator */
+    function setupRainSynthesizer(dest) {
+      const bufferSize = audioCtx.sampleRate * 2;
+      const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+      const output = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        output[i] = Math.random() * 2 - 1;
+      }
+
+      const whiteNoise = audioCtx.createBufferSource();
+      whiteNoise.buffer = noiseBuffer;
+      whiteNoise.loop = true;
+
+      // Bandpass for rainfall filtering
+      const bpFilter = audioCtx.createBiquadFilter();
+      bpFilter.type = 'bandpass';
+      bpFilter.frequency.setValueAtTime(1100, audioCtx.currentTime);
+      bpFilter.Q.setValueAtTime(1.2, audioCtx.currentTime);
+
+      // Low shelf warmth
+      const lowShelf = audioCtx.createBiquadFilter();
+      lowShelf.type = 'lowshelf';
+      lowShelf.frequency.setValueAtTime(400, audioCtx.currentTime);
+      lowShelf.gain.setValueAtTime(4, audioCtx.currentTime);
+
+      const rainGain = audioCtx.createGain();
+      rainGain.gain.setValueAtTime(0.01, audioCtx.currentTime);
+
+      whiteNoise.connect(bpFilter);
+      bpFilter.connect(lowShelf);
+      lowShelf.connect(rainGain);
+      rainGain.connect(dest);
+
+      whiteNoise.start();
+      audioGraph.rain.gain = rainGain;
+    }
+
+    /* 2. Deep Pink Drone Generator */
+    function setupDeepDrone(dest) {
+      // Pink noise synthesis via Paul Kellet filter method
+      const bufferSize = audioCtx.sampleRate * 2;
+      const pinkBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+      const data = pinkBuffer.getChannelData(0);
+      let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+      for (let i = 0; i < bufferSize; i++) {
+        const white = Math.random() * 2 - 1;
+        b0 = 0.99886 * b0 + white * 0.0555179;
+        b1 = 0.99332 * b1 + white * 0.0750759;
+        b2 = 0.96900 * b2 + white * 0.1538520;
+        b3 = 0.86650 * b3 + white * 0.3104856;
+        b4 = 0.55000 * b4 + white * 0.5329522;
+        b5 = -0.7616 * b5 - white * 0.0168980;
+        data[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
+        b6 = white * 0.115926;
+      }
+
+      const pinkNoise = audioCtx.createBufferSource();
+      pinkNoise.buffer = pinkBuffer;
+      pinkNoise.loop = true;
+
+      const lpFilter = audioCtx.createBiquadFilter();
+      lpFilter.type = 'lowpass';
+      lpFilter.frequency.setValueAtTime(180, audioCtx.currentTime);
+      lpFilter.Q.setValueAtTime(3.0, audioCtx.currentTime);
+
+      // Add a warm sub-bass sine wave (55Hz / A1)
+      const subOsc = audioCtx.createOscillator();
+      subOsc.type = 'sine';
+      subOsc.frequency.setValueAtTime(55, audioCtx.currentTime);
+
+      const subOsc2 = audioCtx.createOscillator();
+      subOsc2.type = 'sine';
+      subOsc2.frequency.setValueAtTime(82.4, audioCtx.currentTime); // E2 fifth
+
+      const subGain = audioCtx.createGain();
+      subGain.gain.setValueAtTime(0.18, audioCtx.currentTime);
+      subOsc.connect(subGain);
+      subOsc2.connect(subGain);
+
+      const droneGain = audioCtx.createGain();
+      droneGain.gain.setValueAtTime(0.01, audioCtx.currentTime);
+
+      pinkNoise.connect(lpFilter);
+      lpFilter.connect(droneGain);
+      subGain.connect(droneGain);
+      droneGain.connect(dest);
+
+      pinkNoise.start();
+      subOsc.start();
+      subOsc2.start();
+
+      audioGraph.drone.gain = droneGain;
+    }
+
+    /* 3. Ambient Synth Chords (Gentle Pentatonic Cluster + Slow Chorus LFO) */
+    function setupAmbientPad(dest) {
+      const padGain = audioCtx.createGain();
+      padGain.gain.setValueAtTime(0.01, audioCtx.currentTime);
+
+      // Frequencies: D Minor 9 chord: D3 (146.8), F3 (174.6), A3 (220.0), C4 (261.6), E4 (329.6)
+      const freqs = [146.83, 174.61, 220.00, 261.63, 329.63];
+      
+      freqs.forEach((freq, idx) => {
+        const osc = audioCtx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+
+        // LFO for slow dreamy micro-detune pulsation
+        const lfo = audioCtx.createOscillator();
+        lfo.frequency.setValueAtTime(0.08 + idx * 0.03, audioCtx.currentTime);
+        const lfoGain = audioCtx.createGain();
+        lfoGain.gain.setValueAtTime(1.8, audioCtx.currentTime);
+
+        lfo.connect(lfoGain);
+        lfoGain.connect(osc.frequency);
+
+        const voiceGain = audioCtx.createGain();
+        voiceGain.gain.setValueAtTime(0.12 / freqs.length, audioCtx.currentTime);
+
+        osc.connect(voiceGain);
+        voiceGain.connect(padGain);
+
+        osc.start();
+        lfo.start();
+      });
+
+      padGain.connect(dest);
+      audioGraph.chords.gain = padGain;
+    }
+
+    /* 4. Fire/Vinyl Crackle Synthesis */
+    function setupFireCrackle(dest) {
+      // Buffer of gentle randomized impulse clicks
+      const bufferSize = audioCtx.sampleRate * 3;
+      const crackleBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+      const output = crackleBuffer.getChannelData(0);
+
+      let lastVal = 0;
+      for (let i = 0; i < bufferSize; i++) {
+        // Sparse click impulses
+        if (Math.random() < 0.0028) {
+          const click = (Math.random() * 2 - 1) * Math.pow(Math.random(), 2.5);
+          output[i] = click * 0.85;
+          lastVal = click;
+        } else {
+          // Warm decay
+          lastVal *= 0.88;
+          output[i] = lastVal + (Math.random() * 0.004 - 0.002);
+        }
+      }
+
+      const crackleSource = audioCtx.createBufferSource();
+      crackleSource.buffer = crackleBuffer;
+      crackleSource.loop = true;
+
+      const hpFilter = audioCtx.createBiquadFilter();
+      hpFilter.type = 'highpass';
+      hpFilter.frequency.setValueAtTime(900, audioCtx.currentTime);
+
+      const crackleGain = audioCtx.createGain();
+      crackleGain.gain.setValueAtTime(0.01, audioCtx.currentTime);
+
+      crackleSource.connect(hpFilter);
+      hpFilter.connect(crackleGain);
+      crackleGain.connect(dest);
+
+      crackleSource.start();
+      audioGraph.crackle.gain = crackleGain;
+    }
+
+    function updateSoundVolumes(x, y, rampTime = 0.08) {
+      if (!audioCtx || !audioGraph.masterGain) return;
+      const now = audioCtx.currentTime;
+
+      // Clamp coordinates
+      const clampedX = Math.max(0, Math.min(1, x));
+      const clampedY = Math.max(0, Math.min(1, y));
+
+      // Calculate weight based on quadrants
+      // Q1: Top-Left (Rain)
+      const wRain = (1 - clampedX) * (1 - clampedY);
+      // Q2: Top-Right (Fire Crackle)
+      const wCrackle = clampedX * (1 - clampedY);
+      // Q3: Bottom-Left (Deep Drone)
+      const wDrone = (1 - clampedX) * clampedY;
+      // Q4: Bottom-Right (Synth Chords)
+      const wChords = clampedX * clampedY;
+
+      // Scale to pleasurable dynamic audio levels
+      if (audioGraph.rain.gain) {
+        audioGraph.rain.gain.gain.setTargetAtTime(Math.pow(wRain, 0.7) * 0.55, now, rampTime);
+      }
+      if (audioGraph.crackle.gain) {
+        audioGraph.crackle.gain.gain.setTargetAtTime(Math.pow(wCrackle, 0.6) * 0.40, now, rampTime);
+      }
+      if (audioGraph.drone.gain) {
+        audioGraph.drone.gain.gain.setTargetAtTime(Math.pow(wDrone, 0.7) * 0.70, now, rampTime);
+      }
+      if (audioGraph.chords.gain) {
+        audioGraph.chords.gain.gain.setTargetAtTime(Math.pow(wChords, 0.7) * 0.60, now, rampTime);
+      }
+    }
+
+    const canvas = document.getElementById('stageCanvas');
+    const ctx = canvas.getContext('2d');
+
+    let width = window.innerWidth;
+    let height = window.innerHeight;
+
+    function resizeCanvas() {
+      width = window.innerWidth;
+      height = window.innerHeight;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+      ctx.scale(dpr, dpr);
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    // Visual Particle System
+    const PARTICLE_COUNT = 90;
+    const particles = [];
+
+    class Particle {
+      constructor() {
+        this.reset(true);
+      }
+
+      reset(init = false) {
+        this.x = init ? Math.random() * width : width * 0.5 + (Math.random() - 0.5) * 80;
+        this.y = init ? Math.random() * height : height * 0.5 + (Math.random() - 0.5) * 80;
+        this.baseSize = Math.random() * 2.2 + 0.8;
+        this.alpha = Math.random() * 0.6 + 0.2;
+        this.angle = Math.random() * Math.PI * 2;
+        this.speed = Math.random() * 0.6 + 0.2;
+        this.radialDist = Math.random() * Math.max(width, height) * 0.45;
+        this.life = Math.random() * 1000;
+      }
+
+      update(targetX, targetY) {
+        this.life += 1;
+        const centerX = width * targetX;
+        const centerY = height * targetY;
+
+        this.angle += (this.speed * 0.007);
+        const floatX = Math.cos(this.angle) * this.radialDist;
+        const floatY = Math.sin(this.angle) * this.radialDist;
+
+        // Soft pull towards the current audio focal point
+        this.x += (centerX + floatX - this.x) * 0.02;
+        this.y += (centerY + floatY - this.y) * 0.02;
+
+        if (this.x < -100 || this.x > width + 100 || this.y < -100 || this.y > height + 100) {
+          this.reset();
+        }
+      }
+
+      draw(context, colorRgb) {
+        context.beginPath();
+        context.arc(this.x, this.y, this.baseSize, 0, Math.PI * 2);
+        context.fillStyle = `rgba(${colorRgb}, ${this.alpha * 0.75})`;
+        context.shadowBlur = 8;
+        context.shadowColor = `rgba(${colorRgb}, 0.8)`;
+        context.fill();
+        context.shadowBlur = 0;
+      }
+    }
+
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      particles.push(new Particle());
+    }
+
+    // Color Interpolation helper
+    function lerpColor(c1, c2, t) {
+      return [
+        Math.round(c1[0] + (c2[0] - c1[0]) * t),
+        Math.round(c1[1] + (c2[1] - c1[1]) * t),
+        Math.round(c1[2] + (c2[2] - c1[2]) * t)
+      ];
+    }
+
+    /* Colors corresponding to 4 corners:
+       TL (Rain): Cyan / Deep Blue [30, 95, 140]
+       TR (Crackle): Warm Amber / Rust [165, 85, 30]
+       BL (Drone): Deep Indigo / Violet [45, 25, 90]
+       BR (Chords): Emerald / Cyber Teal [20, 115, 80]
+    */
+    const PALETTE = {
+      TL: [28, 90, 138],
+      TR: [168, 86, 36],
+      BL: [48, 28, 88],
+      BR: [18, 120, 92]
+    };
+
+    let animationFrameId;
+    let breathTime = 0;
+
+    function render(timestamp) {
+      // Smooth interpolation of cursor
+      currentNormX += (targetNormX - currentNormX) * 0.07;
+      currentNormY += (targetNormY - currentNormY) * 0.07;
+
+      breathTime += 0.016;
+      // 4-7-8 Breathing wave approximation (period ~ 6s)
+      const breathPhase = (Math.sin(breathTime * 0.85) + 1) * 0.5;
+      const haloRadius = 70 + breathPhase * 35;
+
+      // Interpolate 2D Quadrant colors
+      const topColor = lerpColor(PALETTE.TL, PALETTE.TR, currentNormX);
+      const bottomColor = lerpColor(PALETTE.BL, PALETTE.BR, currentNormX);
+      const activeColor = lerpColor(topColor, bottomColor, currentNormY);
+      const colorStr = `${activeColor[0]}, ${activeColor[1]}, ${activeColor[2]}`;
+
+      // 1. Draw rich gradient canvas background
+      ctx.fillStyle = '#030406';
+      ctx.fillRect(0, 0, width, height);
+
+      // Radial focal bloom at current cursor
+      const focalX = width * currentNormX;
+      const focalY = height * currentNormY;
+
+      const radialGrad = ctx.createRadialGradient(
+        focalX, focalY, 15,
+        focalX, focalY, Math.max(width, height) * 0.75
+      );
+      radialGrad.addColorStop(0, `rgba(${colorStr}, 0.38)`);
+      radialGrad.addColorStop(0.45, `rgba(${colorStr}, 0.12)`);
+      radialGrad.addColorStop(1, 'rgba(3, 4, 6, 0)');
+
+      ctx.fillStyle = radialGrad;
+      ctx.fillRect(0, 0, width, height);
+
+      // 2. Central / Focal Breathing Halo Rings
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = `rgba(${colorStr}, ${0.25 + breathPhase * 0.35})`;
+      ctx.beginPath();
+      ctx.arc(focalX, focalY, haloRadius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Outer ripple ring
+      ctx.lineWidth = 0.8;
+      ctx.strokeStyle = `rgba(${colorStr}, ${0.12 + breathPhase * 0.15})`;
+      ctx.beginPath();
+      ctx.arc(focalX, focalY, haloRadius * 1.5, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Inner soft core glow
+      const coreGrad = ctx.createRadialGradient(focalX, focalY, 0, focalX, focalY, haloRadius * 0.6);
+      coreGrad.addColorStop(0, `rgba(255, 255, 255, ${0.4 + breathPhase * 0.3})`);
+      coreGrad.addColorStop(0.3, `rgba(${colorStr}, ${0.4 + breathPhase * 0.3})`);
+      coreGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = coreGrad;
+      ctx.beginPath();
+      ctx.arc(focalX, focalY, haloRadius * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 3. Update & render ambient flowing particles
+      for (let i = 0; i < particles.length; i++) {
+        particles[i].update(currentNormX, currentNormY);
+        particles[i].draw(ctx, colorStr);
+      }
+
+      animationFrameId = requestAnimationFrame(render);
+    }
+
+    animationFrameId = requestAnimationFrame(render);
+
+    function setTargetFromClientCoord(clientX, clientY) {
+      targetNormX = Math.max(0, Math.min(1, clientX / window.innerWidth));
+      targetNormY = Math.max(0, Math.min(1, clientY / window.innerHeight));
+
+      if (isAudioStarted && !isMuted) {
+        updateSoundVolumes(targetNormX, targetNormY, 0.05);
+      }
+
+      // Update UI coordinates text
+      const coordEl = document.getElementById('coordDisplay');
+      if (coordEl) {
+        const pctX = Math.round(targetNormX * 100);
+        const pctY = Math.round(targetNormY * 100);
+        coordEl.innerText = `X: ${pctX}% | Y: ${pctY}%`;
+      }
+    }
+
+    function startExperience() {
+      if (!isAudioStarted) {
+        initWebAudio();
+        if (audioCtx.state === 'suspended') {
+          audioCtx.resume();
+        }
+        isAudioStarted = true;
+
+        // Gracefully reveal HUD and quadrant guides
+        const intro = document.getElementById('introOverlay');
+        intro.style.opacity = '0';
+        intro.style.pointerEvents = 'none';
+        setTimeout(() => {
+          intro.classList.add('hidden');
+        }, 1000);
+
+        const hud = document.getElementById('hudControls');
+        hud.classList.remove('opacity-0', 'pointer-events-none');
+        hud.classList.add('opacity-100');
+
+        const qLabels = document.getElementById('quadrantLabels');
+        qLabels.classList.remove('opacity-30');
+        qLabels.classList.add('opacity-45');
+      }
+    }
+
+    // Interactive pointer events
+    window.addEventListener('pointerdown', (e) => {
+      if (!isAudioStarted) {
+        startExperience();
+      }
+      isPointerDown = true;
+      setTargetFromClientCoord(e.clientX, e.clientY);
+    });
+
+    window.addEventListener('pointermove', (e) => {
+      // Respond on drag or hover
+      setTargetFromClientCoord(e.clientX, e.clientY);
+    });
+
+    window.addEventListener('pointerup', () => {
+      isPointerDown = false;
+    });
+
+    // Touch event optimization
+    window.addEventListener('touchmove', (e) => {
+      if (e.touches.length > 0) {
+        setTargetFromClientCoord(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    }, { passive: true });
+
+    const muteBtn = document.getElementById('muteBtn');
+    const soundOnIcon = document.getElementById('soundOnIcon');
+    const soundOffIcon = document.getElementById('soundOffIcon');
+    const muteText = document.getElementById('muteText');
+
+    muteBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!audioCtx) return;
+
+      isMuted = !isMuted;
+      if (isMuted) {
+        audioGraph.masterGain.gain.setTargetAtTime(0.0001, audioCtx.currentTime, 0.2);
+        soundOnIcon.classList.add('hidden');
+        soundOffIcon.classList.remove('hidden');
+        muteText.innerText = '播放';
+      } else {
+        audioGraph.masterGain.gain.setTargetAtTime(0.75, audioCtx.currentTime, 0.2);
+        soundOnIcon.classList.remove('hidden');
+        soundOffIcon.classList.add('hidden');
+        muteText.innerText = '靜音';
+        updateSoundVolumes(targetNormX, targetNormY, 0.1);
+      }
+    });
+
+    const fsBtn = document.getElementById('fsBtn');
+    const fsExpandIcon = document.getElementById('fsExpandIcon');
+    const fsCompressIcon = document.getElementById('fsCompressIcon');
+
+    fsBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {});
+        fsExpandIcon.classList.add('hidden');
+        fsCompressIcon.classList.remove('hidden');
+      } else {
+        if (document.exitFullscreen) {
+          document.exitFullscreen().catch(() => {});
+          fsExpandIcon.classList.remove('hidden');
+          fsCompressIcon.classList.add('hidden');
+        }
+      }
+    });
+
+    document.addEventListener('fullscreenchange', () => {
+      if (!document.fullscreenElement) {
+        fsExpandIcon.classList.remove('hidden');
+        fsCompressIcon.classList.add('hidden');
+      } else {
+        fsExpandIcon.classList.add('hidden');
+        fsCompressIcon.classList.remove('hidden');
+      }
+    });
+  </script>
+</body>
+</html>
